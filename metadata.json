@@ -1,0 +1,8 @@
+{
+  "name": "Remix: ShambaSmart AI",
+  "description": "Agricultural assistant for small-scale farmers in East Africa, providing practical advice on crops, pests, and local climate.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
