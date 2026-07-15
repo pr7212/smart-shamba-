@@ -12,6 +12,7 @@ import {
   Wifi,
   WifiOff,
   ChevronRight,
+  ChevronLeft,
   Info,
   Maximize2,
   Trash2,
@@ -22,10 +23,18 @@ import {
   CloudSun,
   ThermometerSun,
   Navigation,
-  Sparkles
+  Sparkles,
+  Calendar,
+  Eye,
+  Heart,
+  Bug,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
+import { CROP_GROWTH_STAGES } from './data/growthStages';
+import OfflineLibrary from './components/OfflineLibrary';
 
 // App Component
 interface Message {
@@ -110,7 +119,13 @@ export default function App() {
   // Location and Weather State
   const [location, setLocation] = useState<{ lat: number; lon: number; name: string } | null>(REGIONS[0]);
   const [activeCrop, setActiveCrop] = useState(CROPS[0]);
+  const [selectedStageIdx, setSelectedStageIdx] = useState(0);
+  const [isGrowthTrackerExpanded, setIsGrowthTrackerExpanded] = useState(true);
   const [weather, setWeather] = useState<WeatherData | null>(null);
+
+  useEffect(() => {
+    setSelectedStageIdx(0);
+  }, [activeCrop]);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState<string | null>(null);
 
@@ -536,6 +551,171 @@ export default function App() {
             )}
           </div>
         </section>
+
+        {/* Growth Stage Tracker */}
+        <section id="growth-stage-tracker" className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Growth Stage Tracker</h2>
+            <button
+              type="button"
+              onClick={() => setIsGrowthTrackerExpanded(!isGrowthTrackerExpanded)}
+              className="text-[10px] font-bold text-shamba-700 bg-transparent flex items-center gap-1 hover:text-shamba-900 transition-colors focus:outline-none"
+            >
+              {isGrowthTrackerExpanded ? (
+                <>
+                  <span>Hide Details</span>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </>
+              ) : (
+                <>
+                  <span>Show Cycle</span>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="bg-emerald-50/50 border-2 border-emerald-500/20 rounded-3xl p-4 sm:p-5 shadow-sm relative overflow-hidden">
+            {/* Background pattern */}
+            <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-emerald-100 rounded-full blur-[30px] opacity-60 pointer-events-none" />
+            
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-emerald-600 text-white p-1.5 rounded-xl">
+                  <Sprout className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-serif italic text-[#065f46] font-bold text-sm leading-none">
+                    {activeCrop} Growth Cycle
+                  </h3>
+                  <p className="text-[9px] text-[#047857] font-bold mt-1">
+                    Duration: {CROP_GROWTH_STAGES[activeCrop]?.duration || 'Continuous'}
+                  </p>
+                </div>
+              </div>
+              <span className="bg-emerald-100 text-[#047857] text-[9px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider">
+                Stage {selectedStageIdx + 1} of {CROP_GROWTH_STAGES[activeCrop]?.stages.length || 4}
+              </span>
+            </div>
+
+            {/* Steps Timeline bar */}
+            <div className="relative flex items-center justify-between gap-1 mb-5 px-1">
+              {/* Connector line behind stages */}
+              <div className="absolute left-6 right-6 top-1/2 h-[3px] -translate-y-1/2 bg-slate-200/80 -z-10 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-emerald-600 transition-all duration-300"
+                  style={{ width: `${(selectedStageIdx / ((CROP_GROWTH_STAGES[activeCrop]?.stages.length || 4) - 1)) * 100}%` }}
+                />
+              </div>
+
+              {CROP_GROWTH_STAGES[activeCrop]?.stages.map((stage, idx) => {
+                const isSelected = selectedStageIdx === idx;
+                const isCompleted = idx < selectedStageIdx;
+                return (
+                  <button
+                    type="button"
+                    key={idx}
+                    onClick={() => setSelectedStageIdx(idx)}
+                    className="relative flex flex-col items-center focus:outline-none group z-10"
+                    style={{ flex: '1 1 0%' }}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shadow-md transition-all duration-300 ${
+                      isSelected 
+                        ? 'bg-emerald-600 text-white ring-4 ring-emerald-100 scale-110' 
+                        : isCompleted
+                        ? 'bg-emerald-100 text-emerald-800 border-2 border-emerald-500'
+                        : 'bg-white text-slate-400 border-2 border-slate-200 hover:border-emerald-400'
+                    }`}>
+                      {stage.stageNumber}
+                    </div>
+                    <span className={`text-[9px] font-bold mt-1.5 tracking-tight text-center truncate w-full px-1 ${
+                      isSelected ? 'text-emerald-800 font-extrabold' : 'text-slate-500'
+                    }`}>
+                      {stage.weeks}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Active stage detailed view */}
+            {isGrowthTrackerExpanded && CROP_GROWTH_STAGES[activeCrop]?.stages[selectedStageIdx] && (
+              <motion.div
+                key={`${activeCrop}-${selectedStageIdx}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white border border-emerald-100/50 rounded-2xl p-4 shadow-inner space-y-4"
+              >
+                <div>
+                  <h4 className="text-sm font-bold text-[#065f46]">
+                    {CROP_GROWTH_STAGES[activeCrop].stages[selectedStageIdx].name}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5 tracking-wider">
+                    Timeline: {CROP_GROWTH_STAGES[activeCrop].stages[selectedStageIdx].weeks}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                  {/* Expect */}
+                  <div className="flex items-start gap-2.5">
+                    <div className="bg-amber-100/80 p-1.5 rounded-lg text-amber-700 mt-0.5 shrink-0">
+                      <Eye className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-amber-800">What to Expect</h5>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        {CROP_GROWTH_STAGES[activeCrop].stages[selectedStageIdx].expect}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Care */}
+                  <div className="flex items-start gap-2.5">
+                    <div className="bg-emerald-100 p-1.5 rounded-lg text-emerald-700 mt-0.5 shrink-0">
+                      <Heart className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Crop Care Tasks</h5>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        {CROP_GROWTH_STAGES[activeCrop].stages[selectedStageIdx].care}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Water */}
+                  <div className="flex items-start gap-2.5">
+                    <div className="bg-blue-100 p-1.5 rounded-lg text-blue-700 mt-0.5 shrink-0">
+                      <Droplets className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-blue-800">Watering Needs</h5>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        {CROP_GROWTH_STAGES[activeCrop].stages[selectedStageIdx].water}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Pests */}
+                  <div className="flex items-start gap-2.5">
+                    <div className="bg-rose-100 p-1.5 rounded-lg text-rose-700 mt-0.5 shrink-0">
+                      <Bug className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-rose-800">Pest & Disease Watch</h5>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        {CROP_GROWTH_STAGES[activeCrop].stages[selectedStageIdx].pests}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        </section>
+
+        {/* Offline Farming Library */}
+        <OfflineLibrary isOnline={isOnline} />
 
         <AnimatePresence mode="wait">
           {isAnalysing ? (
