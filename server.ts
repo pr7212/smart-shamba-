@@ -21,9 +21,31 @@ const upload = multer({
 const weatherCache = new Map();
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 app.use(express.json({ limit: '10mb' }));
+
+// Helper to get text from Gemini
+async function getGeminiText(prompt: string, modelName: string = "gemini-3-flash-preview", json: boolean = false) {
+  const response = await genAI.models.generateContent({
+    model: modelName,
+    contents: prompt,
+    config: json ? { responseMimeType: "application/json" } : {}
+  });
+  return response.text || "";
+}
+
+// Helper to get text from Gemini with System Instruction (for Chat)
+async function getGeminiChatResponse(contents: any[], systemInstruction: string) {
+  const response = await genAI.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: contents,
+    config: {
+      systemInstruction: systemInstruction
+    }
+  });
+  return response.text || "";
+}
 
 // Crop Analysis Endpoint
 app.post("/api/crop-analyse", upload.single('image'), async (req: any, res: any) => {
@@ -40,10 +62,7 @@ app.post("/api/crop-analyse", upload.single('image'), async (req: any, res: any)
 
     const base64Image = resizedImageBuffer.toString('base64');
 
-    // Stage 2: Gemini 1.5 Flash Vision Analysis via direct fetch
-    const geminiApiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    const aiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
-
+    // Stage 2: Gemini 3 Flash Vision Analysis
     const prompt = `You are an expert agronomist for East African farming. Analyze this crop image and return ONLY a JSON object with:
     {
       "crop": "crop name",
@@ -55,35 +74,42 @@ app.post("/api/crop-analyse", upload.single('image'), async (req: any, res: any)
       "immediate_action": "one urgent step in max 15 words",
       "treatment": "specific treatment using locally available East African products (e.g. Ridomil, Kingcode elite, etc.)",
       "prevention": "one prevention tip relevant to East African climate",
-      "escalate": true
+      "escalate": true,
+      "annotations": [
+        {
+          "x": 25,
+          "y": 40,
+          "width": 15,
+          "height": 20,
+          "label": "Brief descriptive label (e.g., 'Yellowing lesions', 'Caterpillar hole')"
+        }
+      ]
     }
 
-    Base treatment advice on products and practices common in Kenya/Uganda/Tanzania. 
-    If healthy, severity is 'none' and health_status is 'healthy'.`;
+    Important for annotations:
+    - Return 1 to 4 key annotated regions highlighting where the crop issue, symptoms, spots, or damage are located in the image.
+    - If the crop is completely healthy, return an empty array [] for annotations.
+    - Coordinates (x, y, width, height) are integers representing percentages of the image dimension (0 to 100) relative to the top-left corner.
+    - Keep labels very short and descriptive (2-5 words).
+    - Base treatment advice on products and practices common in Kenya/Uganda/Tanzania. 
+    - If healthy, severity is 'none' and health_status is 'healthy'.`;
 
-    const aiRes = await fetch(aiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
+    const response = await genAI.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [
+        {
           parts: [
             { text: prompt },
             { inlineData: { mimeType: "image/jpeg", data: base64Image } }
           ]
-        }],
-        generationConfig: {
-          responseMimeType: "application/json"
         }
-      })
+      ],
+      config: {
+        responseMimeType: "application/json"
+      }
     });
 
-    if (!aiRes.ok) {
-      const errorText = await aiRes.text();
-      throw new Error(`Gemini API error: ${aiRes.status} ${errorText}`);
-    }
-
-    const aiData = await aiRes.json();
-    const resultText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const resultText = response.text || "{}";
     const analysis = JSON.parse(resultText);
 
     res.json(analysis);
@@ -94,6 +120,21 @@ app.post("/api/crop-analyse", upload.single('image'), async (req: any, res: any)
 });
 
 // End of Crop Analysis Endpoint
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { contents, systemInstruction } = req.body;
+    if (!contents || !Array.isArray(contents)) {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
+
+    const text = await getGeminiChatResponse(contents, systemInstruction);
+    res.json({ text });
+  } catch (error) {
+    console.error("Chat Error:", error);
+    res.status(500).json({ error: "Failed to get chat response" });
+  }
+});
 
 app.get("/api/weather", async (req, res) => {
   try {
@@ -152,17 +193,14 @@ app.get("/api/weather", async (req, res) => {
     - Active Crop: ${crop}
     - Location: ${currentData.name}
     - Forecast: ${JSON.stringify(dailyForecasts)}
-    - RULES: JSON only, 3 days, max 15 words per tip, use emojis 🔴🟡🟢.`;
+    - RULES: Return a JSON array of 3 objects, one for each day.
+      REQUIRED FORMAT: [{"day": "DayName", "tip": "🔴 Tip...", "urgency": "high|medium|low"}]
+      Each tip must be max 15 words and crop-specific. Use emojis 🔴🟡🟢 for urgency.`;
 
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
-    });
-    
     let tips = [];
     try {
-      const cleanedText = aiResponse.text?.replace(/```json|```/g, "").trim() || "[]";
-      tips = JSON.parse(cleanedText);
+      const resultText = await getGeminiText(prompt, "gemini-3-flash-preview", true);
+      tips = JSON.parse(resultText);
     } catch (e) {
       tips = dailyForecasts.map(f => ({ day: f.dayName, tip: "🟢 Monitor crop health.", urgency: "low" }));
     }

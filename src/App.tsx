@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { 
   Camera, 
   Send, 
@@ -22,14 +21,13 @@ import {
   Droplets,
   CloudSun,
   ThermometerSun,
-  Navigation
+  Navigation,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-
+// App Component
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -69,6 +67,14 @@ interface CropAnalysis {
   treatment: string;
   prevention: string;
   escalate: boolean;
+  image?: string;
+  annotations?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    label: string;
+  }[];
 }
 
 const REGIONS = [
@@ -95,6 +101,7 @@ export default function App() {
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [analysisStage, setAnalysisStage] = useState(0);
   const [analysisResult, setAnalysisResult] = useState<CropAnalysis | null>(null);
+  const [showAnnotated, setShowAnnotated] = useState(true);
   const [analysisHistory, setAnalysisHistory] = useState<CropAnalysis[]>(() => {
     const saved = localStorage.getItem('shamba_history');
     return saved ? JSON.parse(saved) : [];
@@ -160,8 +167,10 @@ export default function App() {
       if (!response.ok) throw new Error("Analysis failed");
       
       const data = await response.json();
-      setAnalysisResult(data);
-      setAnalysisHistory(prev => [data, ...prev.slice(0, 4)]);
+      const enrichedResult = { ...data, image: selectedImage || undefined };
+      setAnalysisResult(enrichedResult);
+      setShowAnnotated(true);
+      setAnalysisHistory(prev => [enrichedResult, ...prev.slice(0, 4)]);
       setShowWelcome(false);
     } catch (err: any) {
       clearTimeout(timeoutId);
@@ -341,18 +350,22 @@ export default function App() {
         parts: currentParts
       });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: contents,
-        config: {
-          systemInstruction: systemInstruction,
-        }
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: contents,
+          systemInstruction: systemInstruction
+        })
       });
+
+      if (!response.ok) throw new Error("Chat service failed");
+      const data = await response.json();
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.text || "I was unable to generate a response. Please try again.",
+        content: data.text || "I was unable to generate a response. Please try again.",
         timestamp: new Date(),
       };
 
@@ -577,6 +590,81 @@ export default function App() {
                 </div>
 
                 <div className="p-5 space-y-6">
+                  {/* Crop Photo Display and AI Annotation Toggle */}
+                  {analysisResult.image && (
+                    <div className="space-y-3">
+                      <div className="relative w-full h-64 sm:h-80 bg-slate-950 rounded-2xl overflow-hidden shadow-inner border border-slate-200">
+                        <img
+                          src={analysisResult.image}
+                          alt="Crop scan"
+                          className="w-full h-full object-cover transition-all duration-300"
+                        />
+                        
+                        {/* Annotated overlays */}
+                        <AnimatePresence>
+                          {showAnnotated && analysisResult.annotations && analysisResult.annotations.map((ann, idx) => (
+                            <motion.div
+                              key={idx}
+                              initial={{ opacity: 0, scale: 0.8 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ delay: idx * 0.15 }}
+                              className="absolute border-2 border-red-500 bg-red-500/15 rounded-lg group cursor-help"
+                              style={{
+                                left: `${ann.x}%`,
+                                top: `${ann.y}%`,
+                                width: `${ann.width}%`,
+                                height: `${ann.height}%`,
+                              }}
+                            >
+                              {/* Pulsing ring */}
+                              <span className="absolute -inset-1 rounded-lg border-2 border-red-500 animate-ping opacity-40 pointer-events-none" />
+                              
+                              {/* Label Tooltip */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 bg-red-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-md shadow-lg whitespace-nowrap opacity-90 transition-all z-20 pointer-events-none">
+                                {ann.label}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-red-600" />
+                              </div>
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </div>
+
+                      {/* Toggle Buttons */}
+                      {analysisResult.annotations && analysisResult.annotations.length > 0 ? (
+                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm">
+                          <button
+                            type="button"
+                            onClick={() => setShowAnnotated(false)}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all ${
+                              !showAnnotated 
+                                ? 'bg-white text-slate-800 shadow-sm' 
+                                : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            Original Photo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowAnnotated(true)}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all ${
+                              showAnnotated 
+                                ? 'bg-shamba-600 text-white shadow-sm' 
+                                : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            AI Annotated ({analysisResult.annotations.length})
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-center py-2 bg-green-50 border border-green-100 rounded-xl text-green-700 text-xs font-semibold shadow-sm">
+                          ✨ AI scan: No symptoms or anomalies found to annotate. Crop is healthy!
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Status Header */}
                   <div className={`p-4 rounded-2xl flex items-center gap-4 ${
                     analysisResult.severity === 'none' ? 'bg-green-50 border border-green-100' :
